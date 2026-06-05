@@ -54,24 +54,37 @@ class LoginController extends Controller
         
         public function submitlogin(Request $request)
     {
+        // Rate limiting - max 5 attempts per minute
+        $maxAttempts = 5;
+        $decayMinutes = 1;
+        $throttleKey = 'login:' . $request->ip() . ':' . $request->email;
+        
+        if (\Cache::tooManyAttempts($throttleKey, $maxAttempts)) {
+            return back()->with('alert', 'Too many login attempts. Please try again in ' . \Cache::availableIn($throttleKey) . ' seconds.');
+        }
+        
         $validator = Validator::make($request->all(), [
-            'email' => 'required|string',
-            'password' => 'required'
+            'email' => 'required|email|max:255',
+            'password' => 'required|min:8'
         ]);
         if($validator->fails()) {
             // adding an extra field 'error'...
             $validator->errors()->add('error', 'true');
             return response()->json($validator->errors());
         }
-    	if(Auth::attempt(['email' => $request->email,'password' => $request->password,])){
-        	$ip_address=user_ip();
-        	$user=User::find(Auth::user()->id);
-        	$set=$data['set']=Settings::first();
-        	if($ip_address!=$user->ip_address & $set['email_notify']==1){
-    			send_email($user->email, $user->username, 'Suspicious Login Attempt', 'Sorry your account was just accessed from an unknown IP address<br> ' .$ip_address. '<br>If this was you, please you can ignore this message or reset your account password.');
-        	}
-	        $user->last_login=Carbon::now();
-	        $user->ip_address=$ip_address;
+    
+        if(Auth::attempt(['email' => $request->email,'password' => $request->password,])){
+            // Clear throttle on successful login
+            \Cache::forget($throttleKey);
+            
+            $ip_address=user_ip();
+            $user=User::find(Auth::user()->id);
+            $set=$data['set']=Settings::first();
+            if($ip_address!=$user->ip_address & $set['email_notify']==1){
+                send_email($user->email, $user->username, 'Suspicious Login Attempt', 'Sorry your account was just accessed from an unknown IP address<br> ' .$ip_address. '<br>If this was you, please you can ignore this message or reset your account password.');
+            }
+            $user->last_login=Carbon::now();
+            $user->ip_address=$ip_address;
             $user->save();
             if($user->fa_status==1){
                 return redirect()->route('2fa');
@@ -81,7 +94,9 @@ class LoginController extends Controller
             }
             
         } else {
-        	return back()->with('alert', 'Oops! You have entered invalid credentials');
+            // Increment failed attempts
+            \Cache::hit($throttleKey, 0, $decayMinutes * 60);
+            return back()->with('alert', 'Oops! You have entered invalid credentials');
         }
 
     }

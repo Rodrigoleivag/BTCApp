@@ -201,7 +201,6 @@ class PaymentController extends Controller
     //IPN Functions //////
     public function ipnpaypal()
     {
-
         $raw_post_data = file_get_contents('php://input');
         $raw_post_array = explode('&', $raw_post_data);
         $myPost = array();
@@ -229,10 +228,10 @@ class PaymentController extends Controller
         $verify = file_get_contents($callUrl);
         if ($verify == "VERIFIED") {
             //PAYPAL VERIFIED THE PAYMENT
-            $receiver_email = $_POST['receiver_email'];
-            $mc_currency = $_POST['mc_currency'];
-            $mc_gross = $_POST['mc_gross'];
-            $track = $_POST['custom'];
+            $receiver_email = isset($_POST['receiver_email']) ? filter_var($_POST['receiver_email'], FILTER_SANITIZE_EMAIL) : '';
+            $mc_currency = isset($_POST['mc_currency']) ? filter_var($_POST['mc_currency'], FILTER_SANITIZE_STRING) : '';
+            $mc_gross = isset($_POST['mc_gross']) ? filter_var($_POST['mc_gross'], FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION) : '';
+            $track = isset($_POST['custom']) ? filter_var($_POST['custom'], FILTER_SANITIZE_STRING) : '';
 
             //GRAB DATA FROM DATABASE!!
             $data = Deposits::where('trx', $track)->orderBy('id', 'DESC')->first();
@@ -254,26 +253,35 @@ class PaymentController extends Controller
 
         define('ALTERNATE_PHRASE_HASH', $passphrase);
         define('PATH_TO_LOG', '/somewhere/out/of/document_root/');
-        $string =
-            $_POST['PAYMENT_ID'] . ':' . $_POST['PAYEE_ACCOUNT'] . ':' .
-            $_POST['PAYMENT_AMOUNT'] . ':' . $_POST['PAYMENT_UNITS'] . ':' .
-            $_POST['PAYMENT_BATCH_NUM'] . ':' .
-            $_POST['PAYER_ACCOUNT'] . ':' . ALTERNATE_PHRASE_HASH . ':' .
-            $_POST['TIMESTAMPGMT'];
+        
+        // Sanitize POST inputs before use
+        $payment_id = isset($_POST['PAYMENT_ID']) ? filter_var($_POST['PAYMENT_ID'], FILTER_SANITIZE_STRING) : '';
+        $payee_account = isset($_POST['PAYEE_ACCOUNT']) ? filter_var($_POST['PAYEE_ACCOUNT'], FILTER_SANITIZE_STRING) : '';
+        $payment_amount = isset($_POST['PAYMENT_AMOUNT']) ? filter_var($_POST['PAYMENT_AMOUNT'], FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION) : '';
+        $payment_units = isset($_POST['PAYMENT_UNITS']) ? filter_var($_POST['PAYMENT_UNITS'], FILTER_SANITIZE_STRING) : '';
+        $payment_batch_num = isset($_POST['PAYMENT_BATCH_NUM']) ? filter_var($_POST['PAYMENT_BATCH_NUM'], FILTER_SANITIZE_STRING) : '';
+        $payer_account = isset($_POST['PAYER_ACCOUNT']) ? filter_var($_POST['PAYER_ACCOUNT'], FILTER_SANITIZE_STRING) : '';
+        $timestampgmt = isset($_POST['TIMESTAMPGMT']) ? filter_var($_POST['TIMESTAMPGMT'], FILTER_SANITIZE_NUMBER_INT) : '';
+        
+        $string = $payment_id . ':' . $payee_account . ':' .
+            $payment_amount . ':' . $payment_units . ':' .
+            $payment_batch_num . ':' .
+            $payer_account . ':' . ALTERNATE_PHRASE_HASH . ':' .
+            $timestampgmt;
 
         $hash = strtoupper(md5($string));
-        $hash2 = $_POST['V2_HASH'];
+        $hash2 = isset($_POST['V2_HASH']) ? $_POST['V2_HASH'] : '';
 
         if ($hash == $hash2) {
 
-            $amo = $_POST['PAYMENT_AMOUNT'];
-            $unit = $_POST['PAYMENT_UNITS'];
-            $track = $_POST['PAYMENT_ID'];
+            $amo = $payment_amount;
+            $unit = $payment_units;
+            $track = $payment_id;
 
             $data = Deposits::where('trx', $track)->orderBy('id', 'DESC')->first();
             $gnl = Settings::first();
 
-            if ($_POST['PAYEE_ACCOUNT'] == $gatewayData->val1 && $unit == "USD" && $amo == $data->amount && $data->status == '0') {
+            if ($payee_account == $gatewayData->val1 && $unit == "USD" && $amo == $data->amount && $data->status == '0') {
                 //Update User Data
                 return redirect()->route('deposit.verify', ['id' => $data->secret]);
             }
@@ -298,7 +306,8 @@ class PaymentController extends Controller
         $exp = $request->cardExpiry;
         $cvc = $request->cardCVC;
 
-        $exp = $pieces = explode("/", $_POST['cardExpiry']);
+        // Use validated request data instead of raw $_POST
+        $exp = $pieces = explode("/", $request->cardExpiry);
         $emo = trim($exp[0]);
         $eyr = trim($exp[1]);
         $cnts = round($data->amount, 2) * 100;
@@ -343,19 +352,29 @@ class PaymentController extends Controller
 
     public function skrillIPN()
     {
-		 $track = Session::get('Track');
+         $track = Session::get('Track');
         $skrill = Gateway::find(104);
-        $concatFields = $_POST['merchant_id']
-            . $_POST['transaction_id']
+        
+        // Sanitize POST inputs
+        $merchant_id = isset($_POST['merchant_id']) ? filter_var($_POST['merchant_id'], FILTER_SANITIZE_STRING) : '';
+        $transaction_id = isset($_POST['transaction_id']) ? filter_var($_POST['transaction_id'], FILTER_SANITIZE_STRING) : '';
+        $mb_amount = isset($_POST['mb_amount']) ? filter_var($_POST['mb_amount'], FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION) : '';
+        $mb_currency = isset($_POST['mb_currency']) ? filter_var($_POST['mb_currency'], FILTER_SANITIZE_STRING) : '';
+        $status = isset($_POST['status']) ? filter_var($_POST['status'], FILTER_SANITIZE_NUMBER_INT) : '';
+        $md5sig = isset($_POST['md5sig']) ? $_POST['md5sig'] : '';
+        $pay_to_email = isset($_POST['pay_to_email']) ? filter_var($_POST['pay_to_email'], FILTER_SANITIZE_EMAIL) : '';
+        
+        $concatFields = $merchant_id
+            . $transaction_id
             . strtoupper(md5($skrill->val2))
-            . $_POST['mb_amount']
-            . $_POST['mb_currency']
-            . $_POST['status'];
+            . $mb_amount
+            . $mb_currency
+            . $status;
 
         $data = Deposits::where('trx', $track)->orderBy('id', 'DESC')->first();
         $gnl = Settings::first();
 
-        if (strtoupper(md5($concatFields)) == $_POST['md5sig'] && $_POST['status'] == 2 && $_POST['pay_to_email'] == $skrill->val1 && $data->status = '0') {
+        if (strtoupper(md5($concatFields)) == $md5sig && $status == 2 && $pay_to_email == $skrill->val1 && $data->status == '0') {
             //Update User Data
             return redirect()->route('deposit.verify', ['id' => $data->secret]);
 

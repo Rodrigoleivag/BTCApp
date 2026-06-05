@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Input;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
@@ -325,25 +326,57 @@ class UserController extends Controller
         $set=$data['set']=Settings::first();
         $user=$data['user']=User::find(Auth::user()->id);
         $kex=User::whereUsername($request->username)->get();
+        
+        // Check if user must change PIN first
+        if ($user->must_change_pin) {
+            return back()->with('alert', 'You must change your PIN before making transfers.');
+        }
+        
+        // Check if account is locked due to failed PIN attempts
+        if ($user->isPinLocked()) {
+            return back()->with('alert', 'Account temporarily locked due to multiple failed PIN attempts. Try again later.');
+        }
+        
         if(count($kex)>0){
             if($user->balance>$request->amount || $user->balance==$request->amount){
                 $receiver=User::whereUsername($request->username)->first();
-                if($user->pin==$request->pin){
+                
+                // Verify PIN using hash comparison
+                if(Hash::check($request->pin, $user->pin_hash)){
                     if($user->id!=$receiver->id){
-                        $sav['sender_id']=Auth::user()->id;
-                        $sav['receiver_id']=$receiver->id;
-                        $sav['amount']=$request->amount;
-                        $sav['ref_id']=str_random(16);
-                        Transfer::create($sav);
-                        $user->balance=$user->balance-$request->amount;
-                        $user->save();               
-                        $receiver->balance=$receiver->balance+$request->amount;
-                        $receiver->save();
+                        // Use database transaction to prevent race conditions
+                        DB::transaction(function () use ($user, $receiver, $request, $sav) {
+                            $sav['sender_id']=Auth::user()->id;
+                            $sav['receiver_id']=$receiver->id;
+                            $sav['amount']=$request->amount;
+                            $sav['ref_id']=str_random(16);
+                            Transfer::create($sav);
+                            
+                            $user->balance=$user->balance-$request->amount;
+                            $user->save();               
+                            
+                            $receiver->balance=$receiver->balance+$request->amount;
+                            $receiver->save();
+                        });
+                        
+                        // Reset PIN attempts on success
+                        $user->resetPinAttempts();
+                        
                         return back()->with('success', 'Transaction successful.');
                     }else{
                         return back()->with('alert', 'Invalid username.');
                     }
                 }else{
+                    // Record failed PIN attempt
+                    $user->recordFailedPinAttempt();
+                    
+                    // Log failed PIN attempt
+                    \Log::warning('Failed PIN attempt for user: ' . $user->username . ' from IP: ' . user_ip());
+                    
+                    if ($user->isPinLocked()) {
+                        return back()->with('alert', 'Account temporarily locked due to multiple failed PIN attempts. Try again later.');
+                    }
+                    
                     return back()->with('alert', 'Invalid pin.');
                 }
             }else{
@@ -481,23 +514,34 @@ class UserController extends Controller
         public function submitPin(Request $request)
     {
         $this->validate($request, [
-            'current_pin' => 'required',
-            'pin' => 'required|max:4|confirmed'
+            'current_pin' => 'required|string|min:4|max:4',
+            'pin' => 'required|string|min:4|max:4|confirmed'
         ]);
         try {
-
-            $c_pin = Auth::user()->pin;
             $c_id = Auth::user()->id;
             $user = User::findOrFail($c_id);
-            if ($request->current_pin==$c_pin) {
-                if($request->pin==$request->pin_confirmation){
-                    $user->pin = $request->pin;
+            
+            // Verify current PIN using hash comparison
+            if (Hash::check($request->current_pin, $user->pin_hash)) {
+                // Validate new PIN confirmation
+                if($request->pin == $request->pin_confirmation){
+                    // Hash and save new PIN
+                    $user->pin_hash = Hash::make($request->pin);
+                    $user->must_change_pin = false;
+                    $user->resetPinAttempts();
                     $user->save();
                     return back()->with('success', 'Pin Changed Successfully.');
                 }else{
                     return back()->with('alert', 'New Pin Does Not Match.');
                 }
             } else {
+                // Record failed PIN attempt
+                $user->recordFailedPinAttempt();
+                
+                if ($user->isPinLocked()) {
+                    return back()->with('alert', 'Account temporarily locked due to multiple failed PIN attempts. Try again later.');
+                }
+                
                 return back()->with('alert', 'Current Pin Not Match.');
             }
 
