@@ -61,7 +61,7 @@ class RegisterController extends Controller
             'username' => 'required|min:5|unique:users|regex:/^\S*$/u',
             'email' => 'required|string|email|max:255|unique:users',
             'phone' => 'required|numeric|min:8|unique:users',
-            'password' => 'required|string|min:4|confirmed',
+            'password' => 'required|string|min:12|confirmed|regex:/[A-Z]/|regex:/[0-9]/|regex:/[@$!%*?&#]/',
         ]);
         if ($validator->fails()) {
             // adding an extra field 'error'...
@@ -88,6 +88,9 @@ class RegisterController extends Controller
         $email_time = Carbon::parse()->addMinutes(5);
         $phone_time = Carbon::parse()->addMinutes(5);
         $acct='2'.rand(1, 9).rand(0, 9).rand(0, 9).rand(0, 9).rand(0, 9).rand(0, 9).rand(0, 9).rand(0, 9).rand(0, 9);
+        
+        // Generate secure random PIN instead of default '0000'
+        $secure_pin = sprintf("%04d", mt_rand(0, 9999));
 
         $user = new User();
         $user->name = $request->name;
@@ -102,17 +105,17 @@ class RegisterController extends Controller
         $user->phone_time = $phone_time;
         $user->balance = $basic->balance_reg;
         $user->ip_address = user_ip();
-        $user->pin = '0000';
+        $user->pin = Hash::make($secure_pin); // Hash the PIN for security
         $user->password = Hash::make($request->password);
         $user->save();
 
 
         if ($basic->email_verification == 1) {
-            $text = "Your Email Verification Code Is: <b>$user->verification_code</b>";
+            $text = "Your Email Verification Code Is: <b>$user->verification_code</b>. Your temporary PIN is: $secure_pin. Please change it after login.";
             send_email($user->email, $user->name, 'Email verification', $text);
         }
         if ($basic->sms_verification == 1) {
-            $message = "Your phone verification code is: $user->sms_code";
+            $message = "Your phone verification code is: $user->sms_code. Your temporary PIN is: $secure_pin";
             send_sms($user->phone, strip_tags($message));
         }
 
@@ -124,7 +127,6 @@ class RegisterController extends Controller
             return redirect()->intended('user/dashboard');
         }
     }    
-    
     public function submitreferral(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -132,7 +134,7 @@ class RegisterController extends Controller
             'username' => 'required|min:5|unique:users|regex:/^\S*$/u',
             'email' => 'required|string|email|max:255|unique:users',
             'phone' => 'required|numeric|min:8|unique:users',
-            'password' => 'required|string|min:4|confirmed',
+            'password' => 'required|string|min:12|confirmed|regex:/[A-Z]/|regex:/[0-9]/|regex:/[@$!%*?&#]/',
         ]);
         if ($validator->fails()) {
             // adding an extra field 'error'...
@@ -158,6 +160,10 @@ class RegisterController extends Controller
         $sms_code = strtoupper(Str::random(6));
         $email_time = Carbon::parse()->addMinutes(5);
         $phone_time = Carbon::parse()->addMinutes(5);
+        
+        // Generate secure random PIN instead of default '0000'
+        $secure_pin = sprintf("%04d", mt_rand(0, 9999));
+        
         $user = new User();
         $user->name = $request->name;
         $user->email = $request->email;
@@ -171,7 +177,7 @@ class RegisterController extends Controller
         $user->phone_time = $phone_time;
         $user->balance = $basic->balance_reg;
         $user->ip_address = user_ip();
-        $user->pin = '0000';
+        $user->pin = Hash::make($secure_pin); // Hash the PIN for security
         $user->password = Hash::make($request->password);
         $user->save();
         $main = User::whereUsername($request->ref)->first();
@@ -182,11 +188,11 @@ class RegisterController extends Controller
 
 
         if ($basic->email_verification == 1) {
-            $text = "Your Email Verification Code Is: <b>$user->verification_code</b>";
+            $text = "Your Email Verification Code Is: <b>$user->verification_code</b>. Your temporary PIN is: $secure_pin. Please change it after login.";
             send_email($user->email, $user->name, 'Email verification', $text);
         }
         if ($basic->sms_verification == 1) {
-            $message = "Your phone verification code is: $user->sms_code";
+            $message = "Your phone verification code is: $user->sms_code. Your temporary PIN is: $secure_pin";
             send_sms($user->phone, strip_tags($message));
         }
 

@@ -32,22 +32,9 @@ if (! function_exists('send_email')) {
 
 if (! function_exists('user_ip')) {
     function user_ip() {
-        $ipaddress = '';
-        if (getenv('HTTP_CLIENT_IP'))
-            $ipaddress = getenv('HTTP_CLIENT_IP');
-        else if(getenv('HTTP_X_FORWARDED_FOR'))
-            $ipaddress = getenv('HTTP_X_FORWARDED_FOR');
-        else if(getenv('HTTP_X_FORWARDED'))
-            $ipaddress = getenv('HTTP_X_FORWARDED');
-        else if(getenv('HTTP_FORWARDED_FOR'))
-            $ipaddress = getenv('HTTP_FORWARDED_FOR');
-        else if(getenv('HTTP_FORWARDED'))
-           $ipaddress = getenv('HTTP_FORWARDED');
-        else if(getenv('REMOTE_ADDR'))
-            $ipaddress = getenv('REMOTE_ADDR');
-        else
-            $ipaddress = 'UNKNOWN';
-        return $ipaddress;
+        // Only use REMOTE_ADDR to prevent IP spoofing via HTTP headers
+        // If behind a trusted proxy, you can whitelist specific IPs
+        return isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : 'UNKNOWN';
     }
 }
 
