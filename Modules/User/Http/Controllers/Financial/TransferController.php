@@ -1,0 +1,36 @@
+<?php
+
+namespace Modules\User\Http\Controllers\Financial;
+
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Input;
+use Illuminate\Support\Facades\Hash;
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Validator;
+use App\Models\Auth\User;
+use App\Models\Settings;
+use App\Models\Transfer;
+use App\Models\Earning;
+use Carbon\Carbon;
+
+
+class TransferController extends Controller
+{
+
+    public function Transfers()
+    {
+        $data['title']='Own bank transfer';
+        $data['transfer']=Transfer::latest()->get();
+        return view('admin.transfer.transfer', $data);
+    }     
+    
+    public function Referrals()
+    {
+        $data['title']='Referral earnings';
+        $data['earning']=Earning::latest()->get();
+        return view('admin.transfer.referral', $data);
+    } 
+    
+    
+}
